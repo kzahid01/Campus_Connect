@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🎓 Campus Connect
 ### University Real-Time Chat Platform
 
@@ -167,3 +168,6 @@ eventlet==0.36.1
 ---
 
 *Built as a university semester project demonstrating real-time web communication with Flask and Socket.IO.*
+=======
+# Campus_Connect
+>>>>>>> 6afa3036f04f3aceb5cac95ef893284d84571c2e
