@@ -1,97 +1,89 @@
 import eventlet
 eventlet.monkey_patch()
 
-from flask import Flask, render_template, redirect, url_for, request, flash, jsonify
+import os
+import resend
+
+from flask import Flask, render_template, redirect, url_for, request, flash
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer
-from models import db, User, Room, Message
-import os
 
-# ── App Configuration ─────────────────────────────────────────────────────────
+from models import db, User, Room, Message
+
+# ─────────────────────────────────────────────
+# EMAIL (Resend)
+# ─────────────────────────────────────────────
+resend.api_key = os.environ.get("RESEND_API_KEY")
+
+def send_verification_email(email, link):
+    resend.Emails.send({
+        "from": "Campus Connect <onboarding@resend.dev>",
+        "to": email,
+        "subject": "Verify your account",
+        "html": f"""
+            <h2>Verify your account</h2>
+            <p>Click the link below:</p>
+            <a href="{link}">{link}</a>
+        """
+    })
+
+# ─────────────────────────────────────────────
+# APP SETUP
+# ─────────────────────────────────────────────
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "campus-connect-secret-key-2024"
+app.config["SECRET_KEY"] = "campus-connect-secret"
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///database.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-# ── Extensions ────────────────────────────────────────────────────────────────
 db.init_app(app)
+
 socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")
+
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
-login_manager.login_message = "Please log in to access Campus Connect."
 
-# ── Email Verification Token ─────────────────────────────────────────────────
 serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
 
-
-def generate_token(email):
-    return serializer.dumps(email, salt="email-confirm")
-
-
-def confirm_token(token, expiration=3600):
-    return serializer.loads(
-        token,
-        salt="email-confirm",
-        max_age=expiration
-    )
-
-
-# ── Login Manager ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# USER LOADER
+# ─────────────────────────────────────────────
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+# ─────────────────────────────────────────────
+# TOKEN HELPERS
+# ─────────────────────────────────────────────
+def generate_token(email):
+    return serializer.dumps(email, salt="email-confirm")
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  AUTH ROUTES
-# ══════════════════════════════════════════════════════════════════════════════
+def confirm_token(token):
+    return serializer.loads(token, salt="email-confirm", max_age=3600)
+
+# ─────────────────────────────────────────────
+# ROUTES
+# ─────────────────────────────────────────────
 
 @app.route("/")
 def index():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
     return redirect(url_for("login"))
 
-
+# ─── REGISTER ────────────────────────────────
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
 
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        email = request.form.get("email", "").strip()
-        password = request.form.get("password", "")
-        confirm = request.form.get("confirm_password", "")
 
-        # Validation
-        if not username or not email or not password:
-            flash("All fields are required.", "error")
-            return render_template("register.html")
-
-        if len(username) < 3:
-            flash("Username must be at least 3 characters.", "error")
-            return render_template("register.html")
-
-        if password != confirm:
-            flash("Passwords do not match.", "error")
-            return render_template("register.html")
-
-        if len(password) < 6:
-            flash("Password must be at least 6 characters.", "error")
-            return render_template("register.html")
-
-        if User.query.filter_by(username=username).first():
-            flash("Username already taken.", "error")
-            return render_template("register.html")
+        username = request.form["username"]
+        email = request.form["email"]
+        password = request.form["password"]
 
         if User.query.filter_by(email=email).first():
-            flash("Email already registered.", "error")
-            return render_template("register.html")
+            flash("Email already exists")
+            return redirect(url_for("register"))
 
-        # Create user
         user = User(
             username=username,
             email=email,
@@ -102,306 +94,130 @@ def register():
         db.session.add(user)
         db.session.commit()
 
-        # ── Generate Verification Link ─────────────────────────
+        # create verification link
         token = generate_token(user.email)
 
-        verification_link = url_for(
-            "verify_email",
-            token=token,
-            _external=True
-        )
+        link = url_for("verify_email", token=token, _external=True)
 
-        print("\n=== EMAIL VERIFICATION LINK ===")
-        print(verification_link)
-        print("================================\n")
+        # SEND EMAIL (REAL)
+        send_verification_email(user.email, link)
 
-        flash(
-            "Account created! Check terminal for verification link.",
-            "success"
-        )
-
+        flash("Check your email for verification link")
         return redirect(url_for("login"))
 
     return render_template("register.html")
 
-
-# ── VERIFY EMAIL ──────────────────────────────────────────────────────────────
+# ─── VERIFY EMAIL ────────────────────────────
 @app.route("/verify/<token>")
 def verify_email(token):
 
     try:
         email = confirm_token(token)
-
-    except Exception:
-        return "❌ Verification link invalid or expired."
+    except:
+        return "Invalid or expired link"
 
     user = User.query.filter_by(email=email).first()
 
     if not user:
-        return "User not found."
-
-    if user.is_verified:
-        return "✅ Account already verified."
+        return "User not found"
 
     user.is_verified = True
     db.session.commit()
 
-    return "✅ Email verified successfully! You can now log in."
+    return "Email verified! You can now login."
 
-
+# ─── LOGIN ───────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
 
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+
+        username = request.form["username"]
+        password = request.form["password"]
 
         user = User.query.filter_by(username=username).first()
 
         if not user:
-            flash("Invalid username or password.", "error")
-            return render_template("login.html")
+            flash("Invalid login")
+            return redirect(url_for("login"))
 
-        # ── Verification Check ────────────────────────────────
         if not user.is_verified:
-            flash(
-                "Please verify your email before logging in.",
-                "error"
-            )
-            return render_template("login.html")
+            flash("Please verify your email first")
+            return redirect(url_for("login"))
 
         if check_password_hash(user.password_hash, password):
-            user.is_online = True
-            db.session.commit()
-
-            login_user(user, remember=True)
-
+            login_user(user)
             return redirect(url_for("dashboard"))
 
-        else:
-            flash("Invalid username or password.", "error")
+        flash("Wrong password")
 
     return render_template("login.html")
 
-
-@app.route("/logout")
-@login_required
-def logout():
-    current_user.is_online = False
-    db.session.commit()
-    logout_user()
-    flash("You have been logged out.", "success")
-    return redirect(url_for("login"))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  DASHBOARD ROUTES
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ─── DASHBOARD ───────────────────────────────
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    rooms = Room.query.order_by(Room.created_at.desc()).all()
-    online_users = User.query.filter_by(is_online=True).all()
-    return render_template("dashboard.html", rooms=rooms, online_users=online_users)
+    rooms = Room.query.all()
+    return render_template("dashboard.html", rooms=rooms)
 
-
+# ─── CREATE ROOM ─────────────────────────────
 @app.route("/create-room", methods=["POST"])
 @login_required
 def create_room():
-    name = request.form.get("name", "").strip()
-    description = request.form.get("description", "").strip()
 
-    if not name:
-        flash("Room name is required.", "error")
-        return redirect(url_for("dashboard"))
+    name = request.form["name"]
 
-    if len(name) < 3:
-        flash("Room name must be at least 3 characters.", "error")
-        return redirect(url_for("dashboard"))
-
-    if Room.query.filter_by(name=name).first():
-        flash("A room with that name already exists.", "error")
-        return redirect(url_for("dashboard"))
-
-    room = Room(
-        name=name,
-        description=description,
-        created_by=current_user.id
-    )
-
+    room = Room(name=name, created_by=current_user.id)
     db.session.add(room)
     db.session.commit()
 
-    flash(f'Room "{name}" created!', "success")
+    return redirect(url_for("dashboard"))
 
-    return redirect(url_for("room", room_id=room.id))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ROOM ROUTES
-# ══════════════════════════════════════════════════════════════════════════════
-
+# ─── ROOM PAGE ───────────────────────────────
 @app.route("/room/<int:room_id>")
 @login_required
 def room(room_id):
-    room = Room.query.get_or_404(room_id)
 
-    messages = Message.query.filter_by(
-        room_id=room_id
-    ).order_by(
-        Message.timestamp.asc()
-    ).limit(100).all()
+    room = Room.query.get(room_id)
+    messages = Message.query.filter_by(room_id=room_id).all()
 
-    online_users = User.query.filter_by(is_online=True).all()
+    return render_template("room.html", room=room, messages=messages)
 
-    return render_template(
-        "room.html",
-        room=room,
-        messages=messages,
-        online_users=online_users
-    )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  SOCKET.IO EVENTS
-# ══════════════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────
+# SOCKET EVENTS
+# ─────────────────────────────────────────────
 
 @socketio.on("join")
-def on_join(data):
-
-    room_id = str(data.get("room_id"))
-
-    join_room(room_id)
-
-    emit(
-        "status",
-        {
-            "msg": f"{current_user.username} joined the room.",
-            "username": "System"
-        },
-        to=room_id
-    )
-
+def join(data):
+    join_room(str(data["room_id"]))
 
 @socketio.on("leave")
-def on_leave(data):
+def leave(data):
+    leave_room(str(data["room_id"]))
 
-    room_id = str(data.get("room_id"))
+@socketio.on("message")
+def message(data):
 
-    leave_room(room_id)
-
-    emit(
-        "status",
-        {
-            "msg": f"{current_user.username} left the room.",
-            "username": "System"
-        },
-        to=room_id
-    )
-
-
-@socketio.on("send_message")
-def handle_message(data):
-
-    room_id = data.get("room_id")
-    content = data.get("content", "").strip()
-
-    if not content or not room_id:
-        return
-
-    # Truncate very long messages
-    content = content[:1000]
-
-    # Save to database
-    message = Message(
-        content=content,
+    msg = Message(
+        content=data["content"],
         user_id=current_user.id,
-        room_id=int(room_id),
+        room_id=int(data["room_id"])
     )
 
-    db.session.add(message)
+    db.session.add(msg)
     db.session.commit()
 
-    # Broadcast to room
-    emit(
-        "new_message",
-        {
-            "id": message.id,
-            "content": content,
-            "username": current_user.username,
-            "user_id": current_user.id,
-            "timestamp": message.timestamp.strftime("%H:%M · %b %d"),
-            "is_self": False,
-        },
-        to=str(room_id)
-    )
+    emit("message", {
+        "content": data["content"],
+        "username": current_user.username
+    }, to=str(data["room_id"]))
 
-
-@socketio.on("connect")
-def on_connect():
-
-    if current_user.is_authenticated:
-        current_user.is_online = True
-        db.session.commit()
-
-
-@socketio.on("disconnect")
-def on_disconnect():
-
-    if current_user.is_authenticated:
-        current_user.is_online = False
-        db.session.commit()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  DB INIT & SEED
-# ══════════════════════════════════════════════════════════════════════════════
-
-def seed_default_rooms():
-    """Create a few default rooms if none exist."""
-
-    if Room.query.count() == 0:
-
-        admin = User.query.first()
-
-        if not admin:
-            return
-
-        defaults = [
-            ("General 📢", "Open chat for all students"),
-            ("CS Study Group 💻", "Computer Science discussions"),
-            ("Math Help 📐", "Mathematics study & problem solving"),
-            ("Off Topic 🎮", "Anything goes — games, memes, fun"),
-        ]
-
-        for name, desc in defaults:
-
-            room = Room(
-                name=name,
-                description=desc,
-                created_by=admin.id
-            )
-
-            db.session.add(room)
-
-        db.session.commit()
-
-
+# ─────────────────────────────────────────────
+# RUN
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
 
     with app.app_context():
         db.create_all()
-        seed_default_rooms()
 
-    print("\n🎓 Campus Connect is running!")
-    print("http://127.0.0.1:5000\n")
-
-    socketio.run(
-        app,
-        debug=True,
-        host="0.0.0.0",
-        port=5000
-    )
+    socketio.run(app, host="0.0.0.0", port=5000)
