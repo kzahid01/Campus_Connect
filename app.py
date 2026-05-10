@@ -23,7 +23,6 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer
 from models import db, User, Room, Message
-import os
 
 # ── App Configuration ─────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -275,7 +274,39 @@ def room(room_id):
         messages=messages,
         online_users=online_users
     )
+@app.route("/delete-room/<int:room_id>", methods=["POST"])
+@login_required
+def delete_room(room_id):
 
+    room = Room.query.get_or_404(room_id)
+
+    # optional: only allow creator or admin
+    if room.created_by != current_user.id:
+        flash("Not allowed", "error")
+        return redirect(url_for("dashboard"))
+
+    # delete messages first (important)
+    Message.query.filter_by(room_id=room_id).delete()
+
+    db.session.delete(room)
+    db.session.commit()
+
+    flash("Room deleted", "success")
+    return "deleted"
+@app.route("/delete-message/<int:msg_id>", methods=["POST"])
+@login_required
+def delete_message(msg_id):
+
+    msg = Message.query.get_or_404(msg_id)
+
+    # only owner can delete
+    if msg.user_id != current_user.id:
+        return "Not allowed", 403
+
+    db.session.delete(msg)
+    db.session.commit()
+
+    return "Deleted"
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  SOCKET.IO EVENTS

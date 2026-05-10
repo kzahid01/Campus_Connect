@@ -4,139 +4,132 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ room.name }} — Campus Connect</title>
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
+
 <body class="app-body">
 
-  <!-- ── Sidebar ─────────────────────────────────────────── -->
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <span class="sidebar-logo">🎓</span>
-      <span class="sidebar-brand">Campus Connect</span>
+<!-- ── Sidebar ───────────────────────────── -->
+<aside class="sidebar">
+
+  <div class="sidebar-header">
+    <span class="sidebar-logo">🎓</span>
+    <span class="sidebar-brand">Campus Connect</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="{{ url_for('dashboard') }}" class="nav-item">🏠 Dashboard</a>
+    <a href="#" class="nav-item active">💬 {{ room.name }}</a>
+  </nav>
+
+  <div class="sidebar-online">
+    <span class="nav-label">Online ({{ online_users | length }})</span>
+
+    {% for user in online_users %}
+      <div class="online-user">
+        <span class="online-dot"></span>
+        <span class="online-name">{{ user.username }}</span>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="sidebar-footer">
+    <b>{{ current_user.username }}</b>
+  </div>
+
+</aside>
+
+<!-- ── CHAT AREA ───────────────────────────── -->
+<main class="chat-main">
+
+  <!-- Header -->
+  <header class="chat-header">
+    <a href="{{ url_for('dashboard') }}">← Back</a>
+    <div>
+      <h2>{{ room.name }}</h2>
+      <p>{{ room.description }}</p>
+    </div>
+  </header>
+
+  <!-- Messages -->
+  <div class="messages-area" id="messages">
+
+    <div class="msg-system">
+      You joined <b>{{ room.name }}</b>
     </div>
 
-    <nav class="sidebar-nav">
-      <span class="nav-label">Navigation</span>
-      <a href="{{ url_for('dashboard') }}" class="nav-item">
-        <span>🏠</span> Dashboard
-      </a>
-      <a href="#" class="nav-item active">
-        <span>💬</span> {{ room.name | truncate(22) }}
-      </a>
-    </nav>
+    {% for msg in messages %}
 
-    <div class="sidebar-online">
-      <span class="nav-label">Online Now ({{ online_users | length }})</span>
-      <div class="online-list">
-        {% for user in online_users %}
-          <div class="online-user">
-            <span class="online-dot"></span>
-            <span class="online-name">{{ user.username }}</span>
-            {% if user.id == current_user.id %}
-              <span class="you-badge">you</span>
-            {% endif %}
+      {% if msg.user_id == current_user.id %}
+        <!-- SELF MESSAGE -->
+        <div class="msg msg-self">
+
+          <div class="msg-bubble">
+            <p class="msg-text">{{ msg.content }}</p>
+            <span class="msg-time">
+              {{ msg.timestamp.strftime('%H:%M · %b %d') }}
+            </span>
           </div>
-        {% endfor %}
-        {% if not online_users %}
-          <p class="empty-hint">No users online</p>
-        {% endif %}
-      </div>
-    </div>
 
-    <div class="sidebar-footer">
-      <div class="user-chip">
-        <span class="user-avatar">{{ current_user.username[0].upper() }}</span>
-        <span class="user-info">
-          <b>{{ current_user.username }}</b>
-          <small>online</small>
-        </span>
-      </div>
-      <a href="{{ url_for('logout') }}" class="logout-btn" title="Logout">⏻</a>
-    </div>
-  </aside>
+          <!-- DELETE BUTTON -->
+          <form action="/delete-message/{{ msg.id }}" method="POST" class="delete-form">
+            <button type="submit" class="delete-btn"
+              onclick="return confirm('Delete this message?')">
+              🗑
+            </button>
+          </form>
 
-  <!-- ── Chat Area ───────────────────────────────────────── -->
-  <main class="chat-main">
-
-    <!-- Chat Header -->
-    <header class="chat-header">
-      <div class="chat-header-left">
-        <a href="{{ url_for('dashboard') }}" class="back-btn">←</a>
-        <div>
-          <h1 class="chat-room-name">{{ room.name }}</h1>
-          <p class="chat-room-desc">{{ room.description if room.description else 'Chat room' }}</p>
         </div>
-      </div>
-      <div class="chat-header-right">
-        <span class="live-badge">● LIVE</span>
-      </div>
-    </header>
 
-    <!-- Messages -->
-    <div class="messages-area" id="messages">
+      {% else %}
+        <!-- OTHER USER MESSAGE -->
+        <div class="msg msg-other">
 
-      <!-- System welcome -->
-      <div class="msg-system">You joined <b>{{ room.name }}</b></div>
+          <span class="msg-avatar">
+            {{ msg.author.username[0].upper() }}
+          </span>
 
-      <!-- Historical messages from DB -->
-      {% for msg in messages %}
-        {% if msg.user_id == current_user.id %}
-          <div class="msg msg-self">
+          <div>
+            <span class="msg-username">{{ msg.author.username }}</span>
+
             <div class="msg-bubble">
               <p class="msg-text">{{ msg.content }}</p>
-              <span class="msg-time">{{ msg.timestamp.strftime('%H:%M · %b %d') }}</span>
+              <span class="msg-time">
+                {{ msg.timestamp.strftime('%H:%M · %b %d') }}
+              </span>
             </div>
           </div>
-        {% else %}
-          <div class="msg msg-other">
-            <span class="msg-avatar">{{ msg.author.username[0].upper() }}</span>
-            <div>
-              <span class="msg-username">{{ msg.author.username }}</span>
-              <div class="msg-bubble">
-                <p class="msg-text">{{ msg.content }}</p>
-                <span class="msg-time">{{ msg.timestamp.strftime('%H:%M · %b %d') }}</span>
-              </div>
-            </div>
-          </div>
-        {% endif %}
-      {% endfor %}
-    </div>
 
-    <!-- Input Bar -->
-    <div class="chat-input-bar">
-      <div class="chat-input-wrap">
-        <textarea
-          id="msg-input"
-          class="chat-textarea"
-          placeholder="Message {{ room.name }}…"
-          rows="1"
-          maxlength="1000"
-        ></textarea>
-        <button id="send-btn" class="send-btn" title="Send (Enter)">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
-      </div>
-      <p class="input-hint">Enter to send · Shift+Enter for new line</p>
-    </div>
+        </div>
+      {% endif %}
 
-  </main>
+    {% endfor %}
 
-  <!-- Hidden data for JS -->
-  <div
-    id="chat-data"
-    data-room-id="{{ room.id }}"
-    data-username="{{ current_user.username }}"
-    data-user-id="{{ current_user.id }}"
-    style="display:none"
-  ></div>
+  </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
-  <script src="{{ url_for('static', filename='chat.js') }}"></script>
+  <!-- Input -->
+  <div class="chat-input-bar">
+
+    <textarea id="msg-input" placeholder="Type message..." rows="1"></textarea>
+
+    <button id="send-btn">Send</button>
+
+  </div>
+
+</main>
+
+<!-- Data for JS -->
+<div id="chat-data"
+     data-room-id="{{ room.id }}"
+     data-user-id="{{ current_user.id }}"
+     style="display:none">
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='chat.js') }}"></script>
 
 </body>
 </html>
