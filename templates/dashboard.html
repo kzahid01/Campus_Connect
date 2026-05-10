@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — Campus Connect</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body class="app-body">
+
+  <!-- ── Sidebar ─────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-logo">🎓</span>
+      <span class="sidebar-brand">Campus Connect</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <span class="nav-label">Navigation</span>
+      <a href="{{ url_for('dashboard') }}" class="nav-item active">
+        <span>🏠</span> Dashboard
+      </a>
+    </nav>
+
+    <div class="sidebar-online">
+      <span class="nav-label">Online Now ({{ online_users | length }})</span>
+      <div class="online-list">
+        {% for user in online_users %}
+          <div class="online-user">
+            <span class="online-dot"></span>
+            <span class="online-name">{{ user.username }}</span>
+            {% if user.id == current_user.id %}
+              <span class="you-badge">you</span>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% if not online_users %}
+          <p class="empty-hint">No users online</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <span class="user-avatar">{{ current_user.username[0].upper() }}</span>
+        <span class="user-info">
+          <b>{{ current_user.username }}</b>
+          <small>online</small>
+        </span>
+      </div>
+      <a href="{{ url_for('logout') }}" class="logout-btn" title="Logout">⏻</a>
+    </div>
+  </aside>
+
+  <!-- ── Main Content ────────────────────────────────────── -->
+  <main class="main-content">
+
+    <!-- Flash messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-container">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">
+              <span>{{ '✓' if category == 'success' else '⚠' }}</span>
+              {{ message }}
+              <button onclick="this.parentElement.remove()" class="flash-close">×</button>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <!-- Page Header -->
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">Study Rooms</h1>
+        <p class="page-subtitle">Pick a room, dive in — real-time chat awaits</p>
+      </div>
+      <button class="btn-primary" onclick="openModal()">+ New Room</button>
+    </header>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-item">
+        <span class="stat-num">{{ rooms | length }}</span>
+        <span class="stat-label">Rooms</span>
+      </div>
+      <div class="stat-sep"></div>
+      <div class="stat-item">
+        <span class="stat-num">{{ online_users | length }}</span>
+        <span class="stat-label">Online</span>
+      </div>
+    </div>
+
+    <!-- Room Grid -->
+    <div class="room-grid">
+      {% for room in rooms %}
+        <a href="{{ url_for('room', room_id=room.id) }}" class="room-card">
+          <div class="room-card-top">
+            <span class="room-emoji">{{ room.name[0] if room.name[0].isalpha() else '💬' }}</span>
+            <span class="room-id">#{{ room.id }}</span>
+          </div>
+          <h3 class="room-card-name">{{ room.name }}</h3>
+          <p class="room-card-desc">{{ room.description if room.description else 'No description provided.' }}</p>
+          <div class="room-card-footer">
+            <span class="room-msg-count">{{ room.messages | length }} messages</span>
+            <span class="join-label">Join →</span>
+          </div>
+        </a>
+      {% endfor %}
+
+      {% if not rooms %}
+        <div class="empty-state">
+          <div class="empty-icon">💬</div>
+          <h3>No rooms yet</h3>
+          <p>Create the first study room for your campus!</p>
+          <button class="btn-primary" onclick="openModal()">Create Room</button>
+        </div>
+      {% endif %}
+    </div>
+
+  </main>
+
+  <!-- ── Create Room Modal ───────────────────────────────── -->
+  <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Create a Study Room</h2>
+        <button onclick="closeModal()" class="modal-close">×</button>
+      </div>
+      <form method="POST" action="{{ url_for('create_room') }}" class="auth-form">
+        <div class="form-group">
+          <label for="room-name">Room Name</label>
+          <input
+            type="text"
+            id="room-name"
+            name="name"
+            placeholder="e.g. Algorithms Study Group"
+            minlength="3"
+            maxlength="100"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="room-desc">Description <span class="optional">(optional)</span></label>
+          <input
+            type="text"
+            id="room-desc"
+            name="description"
+            placeholder="What's this room about?"
+            maxlength="255"
+          />
+        </div>
+        <button type="submit" class="btn-primary" style="width:100%">Create Room →</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function openModal() {
+      document.getElementById("modal-overlay").classList.remove("hidden");
+      document.getElementById("room-name").focus();
+    }
+    function closeModal(e) {
+      if (!e || e.target === document.getElementById("modal-overlay")) {
+        document.getElementById("modal-overlay").classList.add("hidden");
+      }
+    }
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+  </script>
+
+</body>
+</html>
